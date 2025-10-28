@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+.env
+data/books/*.pdf
+chroma_db/
