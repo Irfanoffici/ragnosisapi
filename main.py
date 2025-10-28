@@ -14,8 +14,7 @@ CONFIG = {
     "chunk_size": 800,
     "chunk_overlap": 100,
     "embedding_model": "sentence-transformers/all-MiniLM-L6-v2",
-    "groq_api_key": os.getenv("GROQ_API_KEY", "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"),
-    "gemini_api_key": os.getenv("GEMINI_API_KEY", "AIzaSyAqAp5_60wxyspiLM0XnX3LBj6hY3GBBHc")
+    "groq_api_key": os.getenv("GROQ_API_KEY", "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")
 }
 
 class QueryRequest(BaseModel):
@@ -33,80 +32,111 @@ class SimpleRAG:
         self.collection = self.client.create_collection("medical_books")
         self.setup_database()
     
-    def extract_text_from_files(self):
-        """Extract text from all .txt files in books folder"""
-        all_text = ""
+    def load_all_text_files(self):
+        """Load text from all 9 medical text files with exact names"""
         books_path = "./books"
+        all_chunks = []
+        
+        # Exact file names as they appear
+        expected_files = [
+            "Anatomy&Physiology.txt",  # Capital P
+            "Cardiology.txt", 
+            "Dentistry.txt",
+            "EmergencyMedicine.txt",   # Capital M
+            "Gastrology.txt",
+            "General.txt",
+            "InfectiousDisease.txt",
+            "InternalMedicine.txt",
+            "Nephrology.txt"
+        ]
         
         if not os.path.exists(books_path):
             print("⚠️  No 'books' folder found. Using sample data.")
             return ["Sample medical context 1", "Sample context 2"]
         
-        for text_file in os.listdir(books_path):
-            if text_file.endswith(".txt"):
-                try:
-                    with open(os.path.join(books_path, text_file), 'r', encoding='utf-8') as file:
-                        text = file.read()
-                        all_text += text + "\n\n"
-                    print(f"✅ Processed: {text_file}")
-                except Exception as e:
-                    print(f"❌ Error processing {text_file}: {e}")
+        print("📚 Loading medical textbooks...")
         
-        return self.chunk_text(all_text)
+        found_files = 0
+        for filename in expected_files:
+            file_path = os.path.join(books_path, filename)
+            if os.path.exists(file_path):
+                try:
+                    with open(file_path, 'r', encoding='utf-8') as file:
+                        text = file.read()
+                    
+                    if text.strip():  # Only process non-empty files
+                        # Chunk each file individually
+                        file_chunks = self.chunk_text(text, filename.replace('.txt', ''))
+                        all_chunks.extend(file_chunks)
+                        print(f"✅ Loaded: {filename} -> {len(file_chunks)} chunks")
+                        found_files += 1
+                    else:
+                        print(f"⚠️  Empty file: {filename}")
+                    
+                except Exception as e:
+                    print(f"❌ Error processing {filename}: {e}")
+            else:
+                print(f"❌ Missing: {filename}")
+        
+        print(f"📊 Found {found_files}/9 medical textbooks")
+        return all_chunks
     
-    def chunk_text(self, text):
-        """Split text into chunks"""
-        paragraphs = text.split('\n\n')
+    def chunk_text(self, text, subject):
+        """Split text into chunks with subject reference"""
+        # Clean and split text
+        paragraphs = [p.strip() for p in text.split('\n\n') if p.strip() and len(p.strip()) > 20]
         chunks = []
         
         current_chunk = ""
         for paragraph in paragraphs:
-            paragraph = paragraph.strip()
-            if not paragraph:
-                continue
-                
+            # If adding this paragraph exceeds chunk size, save current chunk
             if len(current_chunk) + len(paragraph) > CONFIG["chunk_size"]:
                 if current_chunk:
-                    chunks.append(current_chunk.strip())
+                    chunk_with_ref = f"[{subject}] {current_chunk}"
+                    chunks.append(chunk_with_ref.strip())
                 current_chunk = paragraph
             else:
                 if current_chunk:
-                    current_chunk += "\n\n" + paragraph
+                    current_chunk += " " + paragraph
                 else:
                     current_chunk = paragraph
         
+        # Add the last chunk
         if current_chunk:
-            chunks.append(current_chunk.strip())
+            chunk_with_ref = f"[{subject}] {current_chunk}"
+            chunks.append(chunk_with_ref.strip())
             
         return chunks
     
     def setup_database(self):
-        """Setup vector database with text content"""
-        print("🔄 Setting up RAG database...")
+        """Setup vector database with all medical textbooks"""
+        print("🔄 Building medical knowledge base...")
         
-        chunks = self.extract_text_from_files()
+        chunks = self.load_all_text_files()
         
-        if chunks:
+        if chunks and len(chunks) > 0:
             self.collection.add(
                 documents=chunks,
                 ids=[f"chunk_{i}" for i in range(len(chunks))]
             )
-            print(f"✅ Loaded {len(chunks)} chunks from text files")
+            print(f"🎉 Medical RAG system ready! Loaded {len(chunks)} chunks from medical textbooks")
+            print("💊 Specialties: Anatomy, Cardiology, Dentistry, Emergency Medicine, Gastrology, General, Infectious Disease, Internal Medicine, Nephrology")
         else:
+            # Fallback sample data
             sample_chunks = [
-                "Tdap vaccination should be administered during pregnancy between 27-36 weeks gestation.",
-                "Common vaccine side effects include mild fever, redness at injection site, and fatigue.",
-                "Booster doses are typically recommended every 10 years for adults.",
-                "Contraindications include severe allergic reactions to previous doses."
+                "[Anatomy&Physiology] The human body consists of various systems including skeletal, muscular, and nervous systems.",
+                "[Cardiology] The cardiovascular system includes the heart and blood vessels, responsible for circulating blood.",
+                "[EmergencyMedicine] Emergency care focuses on immediate treatment of acute illnesses and injuries.",
+                "[InfectiousDisease] Infectious diseases are caused by pathogenic microorganisms and can be transmitted between individuals.",
             ]
             self.collection.add(
                 documents=sample_chunks,
                 ids=[f"sample_{i}" for i in range(len(sample_chunks))]
             )
-            print("⚠️  Using sample data - add your text files to 'books' folder")
+            print("⚠️  Using sample data - check that all 9 medical files are in books/ folder")
     
     def search_contexts(self, query, top_k):
-        """Search for relevant contexts"""
+        """Search for relevant medical contexts"""
         try:
             results = self.collection.query(
                 query_texts=[query],
@@ -118,26 +148,27 @@ class SimpleRAG:
             return []
     
     def generate_with_groq(self, query, contexts):
-        """Generate answer using Groq API (Fast & Free)"""
+        """Generate medical answer using Groq API"""
         if not contexts:
-            return "I couldn't find relevant information in the provided materials."
+            return "I couldn't find relevant information in the medical textbooks."
         
         context_text = "\n".join([f"- {ctx}" for ctx in contexts])
         
-        prompt = f"""You are a medical assistant. Based ONLY on the following context from medical books, provide a concise and accurate answer to the question.
+        prompt = f"""You are a medical expert. Based ONLY on the following context from medical textbooks, provide a concise and accurate answer to the question.
 
 Question: {query}
 
-Relevant Context:
+Relevant Context from Medical Textbooks:
 {context_text}
 
 Instructions:
-- Answer using ONLY the provided context
-- Be concise and factual
-- If context doesn't contain answer, say "I cannot find this information in the provided materials"
-- Do not add any external knowledge
+- Answer using ONLY the provided medical context
+- Be concise and factual (1-2 sentences maximum)
+- If context doesn't contain answer, say "I cannot find this information in the provided medical textbooks"
+- Do not add any external knowledge or personal opinions
+- Provide only evidence-based medical information
 
-Answer:"""
+Medical Answer:"""
         
         try:
             headers = {
@@ -149,16 +180,17 @@ Answer:"""
                 "messages": [
                     {
                         "role": "system",
-                        "content": "You are a medical assistant that provides accurate information based only on provided context."
+                        "content": "You are a medical expert that provides accurate, evidence-based information using only the provided medical textbook context. Be concise and factual."
                     },
                     {
                         "role": "user", 
                         "content": prompt
                     }
                 ],
-                "model": "llama3-8b-8192",  # Fast and free model
+                "model": "llama3-8b-8192",
                 "temperature": 0.1,
-                "max_tokens": 500
+                "max_tokens": 150,
+                "top_p": 0.9
             }
             
             response = requests.post(
@@ -170,81 +202,33 @@ Answer:"""
             
             if response.status_code == 200:
                 result = response.json()
-                return result['choices'][0]['message']['content'].strip()
+                answer = result['choices'][0]['message']['content'].strip()
+                # Ensure answer is concise
+                if len(answer) > 250:
+                    sentences = answer.split('.')
+                    if len(sentences) > 2:
+                        answer = '.'.join(sentences[:2]) + '.'
+                return answer
             else:
                 print(f"Groq API error: {response.status_code}")
-                return self.generate_with_gemini(query, contexts)
-                
-        except Exception as e:
-            print(f"Groq error: {e}")
-            return self.generate_with_gemini(query, contexts)
-    
-    def generate_with_gemini(self, query, contexts):
-        """Generate answer using Gemini API (Fallback)"""
-        if not contexts:
-            return "I couldn't find relevant information in the provided materials."
-        
-        context_text = "\n".join([f"- {ctx}" for ctx in contexts])
-        
-        prompt = f"""Based ONLY on the following medical context, provide a concise and accurate answer to the question.
-
-Question: {query}
-
-Relevant Context:
-{context_text}
-
-Answer concisely and factually using only the provided context. If the context doesn't contain the answer, say "I cannot find this information in the provided materials"."""
-
-        try:
-            url = f"https://generativelanguage.googleapis.com/v1/models/gemini-pro:generateContent?key={CONFIG['gemini_api_key']}"
-            
-            data = {
-                "contents": [{
-                    "parts": [{"text": prompt}]
-                }],
-                "generationConfig": {
-                    "temperature": 0.1,
-                    "maxOutputTokens": 500
-                }
-            }
-            
-            response = requests.post(url, json=data, timeout=30)
-            
-            if response.status_code == 200:
-                result = response.json()
-                return result['candidates'][0]['content']['parts'][0]['text'].strip()
-            else:
-                print(f"Gemini API error: {response.status_code}")
                 return self.simple_fallback(query, contexts)
                 
         except Exception as e:
-            print(f"Gemini error: {e}")
+            print(f"Groq error: {e}")
             return self.simple_fallback(query, contexts)
     
     def simple_fallback(self, query, contexts):
-        """Simple rule-based fallback"""
+        """Simple medical fallback"""
         if not contexts:
-            return "I cannot find this information in the provided materials."
+            return "I cannot find this information in the provided medical textbooks."
         
-        context_text = " ".join(contexts).lower()
-        
-        # Medical patterns
-        if any(word in query.lower() for word in ['tdap', 'booster']):
-            if 'pregnancy' in context_text:
-                return "Tdap is recommended during pregnancy between 27-36 weeks gestation."
-            else:
-                return "Tdap booster is recommended every 10 years for adults."
-        
-        elif 'side effect' in query.lower():
-            return "Common side effects include mild fever, redness at injection site, and fatigue."
-        
-        else:
-            return f"Based on the medical guidelines: {contexts[0][:200]}..."
+        # Return most relevant medical context
+        return contexts[0][:200] + "..." if len(contexts[0]) > 200 else contexts[0]
     
     def query(self, query, top_k=5):
         """Main query function"""
         contexts = self.search_contexts(query, top_k)
-        answer = self.generate_with_groq(query, contexts)  # Try Groq first
+        answer = self.generate_with_groq(query, contexts)
         return answer, contexts
 
 # Initialize RAG system
@@ -258,147 +242,36 @@ async def query_endpoint(request: QueryRequest):
 
 @app.get("/")
 async def root():
-    return {"message": "RAGnosis API is running", "version": "1.0.0"}
+    return {"message": "RAGnosis Medical API is running", "version": "1.0.0"}
 
 @app.get("/health")
 async def health():
-    return {"status": "healthy"}
+    return {"status": "healthy", "specialties": 9}
 
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)    def extract_text_from_pdfs(self):
-        """Extract text from all PDFs in books folder"""
-        all_text = ""
-        books_path = "./books"
-        
-        if not os.path.exists(books_path):
-            print("⚠️  No 'books' folder found. Using sample data.")
-            return ["Sample medical context 1", "Sample context 2"]
-        
-        for pdf_file in os.listdir(books_path):
-            if pdf_file.endswith(".pdf"):
-                try:
-                    with open(os.path.join(books_path, pdf_file), 'rb') as file:
-                        reader = PyPDF2.PdfReader(file)
-                        for page in reader.pages:
-                            text = page.extract_text()
-                            if text:
-                                all_text += text + "\n"
-                    print(f"✅ Processed: {pdf_file}")
-                except Exception as e:
-                    print(f"❌ Error processing {pdf_file}: {e}")
-        
-        return self.chunk_text(all_text)
+@app.get("/files")
+async def check_files():
+    """Check if all medical files are present"""
+    expected_files = [
+        "Anatomy&Physiology.txt", "Cardiology.txt", "Dentistry.txt",
+        "EmergencyMedicine.txt", "Gastrology.txt", "General.txt",
+        "InfectiousDisease.txt", "InternalMedicine.txt", "Nephrology.txt"
+    ]
     
-    def chunk_text(self, text):
-        """Split text into chunks"""
-        words = text.split()
-        chunks = []
-        
-        for i in range(0, len(words), CONFIG["chunk_size"] - CONFIG["chunk_overlap"]):
-            chunk = " ".join(words[i:i + CONFIG["chunk_size"]])
-            chunks.append(chunk)
-            
-            if i + CONFIG["chunk_size"] >= len(words):
-                break
-                
-        return chunks
+    found_files = []
+    missing_files = []
     
-    def setup_database(self):
-        """Setup vector database with PDF content"""
-        print("🔄 Setting up RAG database...")
-        
-        chunks = self.extract_text_from_pdfs()
-        
-        # Add chunks to vector database
-        if chunks:
-            self.collection.add(
-                documents=chunks,
-                ids=[f"chunk_{i}" for i in range(len(chunks))]
-            )
-            print(f"✅ Loaded {len(chunks)} chunks into database")
+    for filename in expected_files:
+        if os.path.exists(f"./books/{filename}"):
+            found_files.append(filename)
         else:
-            # Fallback sample data
-            sample_chunks = [
-                "Tdap vaccination should be administered during pregnancy between 27-36 weeks gestation.",
-                "Common vaccine side effects include mild fever, redness at injection site, and fatigue.",
-                "Booster doses are typically recommended every 10 years for adults.",
-                "Contraindications include severe allergic reactions to previous doses."
-            ]
-            self.collection.add(
-                documents=sample_chunks,
-                ids=[f"sample_{i}" for i in range(len(sample_chunks))]
-            )
-            print("⚠️  Using sample data - add your PDFs to 'books' folder")
+            missing_files.append(filename)
     
-    def search_contexts(self, query, top_k):
-        """Search for relevant contexts"""
-        results = self.collection.query(
-            query_texts=[query],
-            n_results=min(top_k, 10)
-        )
-        return results['documents'][0] if results['documents'] else []
-    
-    def generate_answer(self, query, contexts):
-        """Generate answer using Grok API"""
-        if not contexts:
-            return "I couldn't find relevant information in the provided materials."
-        
-        # Prepare context for LLM
-        context_text = "\n".join([f"- {ctx}" for ctx in contexts])
-        
-        # Grok API call (replace with actual Grok implementation)
-        try:
-            # This is a placeholder - replace with actual Grok API call
-            prompt = f"""Based on the following medical context, provide a concise and accurate answer to the question.
-
-Question: {query}
-
-Relevant Context:
-{context_text}
-
-Answer concisely and factually using only the provided context:"""
-            
-            # For now, using a simple rule-based response
-            # Replace this with actual Grok API call when you have credentials
-            answer = self.simple_llm_fallback(query, contexts)
-            return answer
-            
-        except Exception as e:
-            print(f"LLM Error: {e}")
-            return self.simple_llm_fallback(query, contexts)
-    
-    def simple_llm_fallback(self, query, contexts):
-        """Fallback when Grok is not available"""
-        if "tdap" in query.lower() or "booster" in query.lower():
-            return "Tdap booster is recommended every 10 years for adults."
-        elif "side effect" in query.lower():
-            return "Common side effects include mild fever and injection site redness."
-        else:
-            return f"Based on the medical guidelines: {contexts[0][:100]}..." if contexts else "Information not found in provided materials."
-    
-    def query(self, query, top_k=5):
-        """Main query function"""
-        contexts = self.search_contexts(query, top_k)
-        answer = self.generate_answer(query, contexts)
-        return answer, contexts
-
-# Initialize RAG system
-rag = SimpleRAG()
-
-@app.post("/query")
-async def query_endpoint(request: QueryRequest):
-    """Main API endpoint"""
-    answer, contexts = rag.query(request.query, request.top_k)
-    return QueryResponse(answer=answer, contexts=contexts)
-
-@app.get("/")
-async def root():
-    return {"message": "RAGnosis API is running", "version": "1.0.0"}
-
-@app.get("/health")
-async def health():
-    return {"status": "healthy"}
+    return {
+        "found_files": found_files,
+        "missing_files": missing_files,
+        "total_expected": 9,
+        "total_found": len(found_files)
+    }
 
 if __name__ == "__main__":
     import uvicorn
